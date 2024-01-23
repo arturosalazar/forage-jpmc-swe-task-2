@@ -1,0 +1,124 @@
+From af953681f18acffc30f2067562d6484a54ea27cf Mon Sep 17 00:00:00 2001
+From: Arturo Salazar <arturo.v.salazar.jr@gmail.com>
+Date: Fri, 19 Jan 2024 15:44:36 -0600
+Subject: [PATCH] Update App.tsx to repeatedly request stream of data and show
+ graph and Graph.tsx to update graph as data gets updated (while ignoring
+ duplicates)
+
+---
+ src/App.tsx   | 35 +++++++++++++++++++++++++++++------
+ src/Graph.tsx | 18 ++++++++++++++++--
+ 2 files changed, 45 insertions(+), 8 deletions(-)
+
+diff --git a/src/App.tsx b/src/App.tsx
+index 0728518..0443e84 100755
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -8,6 +8,8 @@ import './App.css';
+  */
+ interface IState {
+   data: ServerRespond[],
++  // Add property to have way to indicate whether or not graph should be visible
++  showGraph: boolean,
+ }
+ 
+ /**
+@@ -22,6 +24,8 @@ class App extends Component<{}, IState> {
+       // data saves the server responds.
+       // We use this state to parse data down to the child element (Graph) as element property
+       data: [],
++      // Set the initial state of graph to hidden by setting to false
++      showGraph: false,
+     };
+   }
+ 
+@@ -29,18 +33,37 @@ class App extends Component<{}, IState> {
+    * Render Graph react component with state.data parse as property data
+    */
+   renderGraph() {
+-    return (<Graph data={this.state.data}/>)
++      // Check to ensure graph is only visible if it has been switched on
++      if (this.state.showGraph){
++        return (<Graph data={this.state.data}/>)
++      }
+   }
+ 
+   /**
+    * Get new data from server and update the state with the new data
+    */
+   getDataFromServer() {
+-    DataStreamer.getData((serverResponds: ServerRespond[]) => {
+-      // Update the state by creating a new array of data that consists of
+-      // Previous data in the state and the new data from server
+-      this.setState({ data: [...this.state.data, ...serverResponds] });
+-    });
++    // Set a variable x to 0. X will be incremented, and the execution will stop when x is greater than 1000
++    let x = 0;
++    // Set up a repeating inverval that runs the arrow function every 100 miliseconds
++    const interval = setInterval(() => {
++      // On Each Interval - call DataStreamer.getData() sends request to server
++      // If successful - server response is parsed into JSON and arrow callback function is called w/ server response
++      DataStreamer.getData((serverResponds: ServerRespond[]) => {
++        // State updated by setting data in component to server response and showing graph to re-render with new data
++        this.setState({
++          data: serverResponds,
++          showGraph: true,
++        });
++      });
++      // Increment the x on each interval repetition
++      x++;
++      // If we get above threshold, stop execution of this interval
++      if (x > 1000) {
++        clearInterval(interval);
++      }
++      // 100 is the execution interval (run every 100 ms). Data fetching stops after that
++    },100);
+   }
+ 
+   /**
+diff --git a/src/Graph.tsx b/src/Graph.tsx
+index 3b2a7da..30affec 100644
+--- a/src/Graph.tsx
++++ b/src/Graph.tsx
+@@ -14,7 +14,7 @@ interface IProps {
+  * Perspective library adds load to HTMLElement prototype.
+  * This interface acts as a wrapper for Typescript compiler.
+  */
+-interface PerspectiveViewerElement {
++interface PerspectiveViewerElement extends HTMLElement{
+   load: (table: Table) => void,
+ }
+ 
+@@ -32,7 +32,7 @@ class Graph extends Component<IProps, {}> {
+ 
+   componentDidMount() {
+     // Get element to attach the table from the DOM.
+-    const elem: PerspectiveViewerElement = document.getElementsByTagName('perspective-viewer')[0] as unknown as PerspectiveViewerElement;
++    const elem = document.getElementsByTagName('perspective-viewer')[0] as unknown as PerspectiveViewerElement;
+ 
+     const schema = {
+       stock: 'string',
+@@ -49,6 +49,20 @@ class Graph extends Component<IProps, {}> {
+ 
+       // Add more Perspective configurations here.
+       elem.load(this.table);
++      // view - determine kind of graph (here, y_line)
++      elem.setAttribute('view', 'y_line');
++      // column-pivots - allows us to distinguish between different stocks
++      elem.setAttribute('column-pivots', '["stock"]');
++      // row-pivots - allow us to map each data point based on its time stamp
++      elem.setAttribute("row-pivots", '["timestamp"]');
++      // columns - allows us to focus on a particular part of stock's data on y axis - here only top_ask_price
++      elem.setAttribute('columns', '["top_ask_price"]');
++      // aggregage - allows us to handle duplicated data and consolidate it to a single data point
++      //  the stock name and time stamp are only considered if unique (distinct count). If similar, average out top ask and big prices 
++      //  of the 'similar' data points
++      elem.setAttribute("aggregates", 
++        '{"stock": "distinct count", "top_ask_price":"avg", "top_bid_price":"avg", "timestamp":"distinct count"}'
++      );
+     }
+   }
+ 
+-- 
+2.38.1.windows.1
+
